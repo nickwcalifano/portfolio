@@ -5,6 +5,7 @@
 # Data files
 *.xlsx
 *.csv
+*.parquet
 
 # Model files
 *.h5
