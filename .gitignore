@@ -6,6 +6,8 @@
 *.xlsx
 *.csv
 *.parquet
+*.txt
+*.jsonl
 
 # Model files
 *.h5
