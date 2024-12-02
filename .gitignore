@@ -7,7 +7,12 @@
 *.csv
 *.parquet
 *.txt
+*.json
 *.jsonl
 
 # Model files
 *.h5
+
+# Debugging Files
+*.npy
+*.pickle
