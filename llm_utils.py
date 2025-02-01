@@ -49,7 +49,7 @@ async def call_cached_llm(
         )
     else:
         hashable_payload = tuple(
-            [model_name, request_payload["prompt"]] +
+            [model_name, request_payload["messages"][0]["content"], request_payload["messages"][1]["content"]] +
             [request_payload[item] for item in ["temperature", "top_p"]]
         )
 
@@ -129,7 +129,7 @@ async def call_azure_openai(
             if returned_stopped_only and response["choices"][0]["finish_reason"] != "stop":
                 retval = None
             else:
-                retval = response["choices"][0]["text"]
+                retval = response["choices"][0]["messages"][0]["content"]
 
             # If the model returns a valid response, there's no need for further retries. Break out of the for-loop
             break
