@@ -7,20 +7,21 @@ import aiohttp
 import numpy as np
 
 # Define GPT endpoints and retry parameters
-URL_GPT4O_MINI_COMPLETE = "https://{endpoint}/openai/deployments/{deployment-id}/completions?api-version=2024-10-21"
+URL_AZURE = "https://{endpoint}/openai/deployments/{deployment-id}/chat/completions?api-version=2024-10-21"
 AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY")
 NUM_REQUEST_RETRIES = 10 # If we have hit our token quota, we wait some time then try again (exponential backoff)
 MAX_WAIT_TIME = 60 # Max time in seconds to sleep each time we wait
-GPT_4O_HEADERS = {
+AZURE_HEADERS = {
     "Content-Type": "application/json",
     "api-key": AZURE_OPENAI_KEY
 }
 
 # Define ollama endpoints
-URL_OLLAMA_GEN = "http://localhost:11434/api/generate"
+URL_OLLAMA = "http://localhost:11434/api/generate"
 ALLOWED_MODEL_STRINGS = Literal["deepseek-r1:14b", "llama3.2-vision", "phi4", "gpt4o-mini", "gpt4o"]
+SERVER_TYPES = Literal["azure_openai", "ollama"]
 
-def get_model_type(model_name: ALLOWED_MODEL_STRINGS) -> str:
+def get_model_type(model_name: ALLOWED_MODEL_STRINGS) -> SERVER_TYPES:
     """ Returns llama if the model is a llama model and returns gpt if the model is a gpt model
     """
     if "gpt" in model_name:
@@ -58,7 +59,10 @@ async def call_cached_llm(
 
     # Since the request is new, make a call to the LLM and save the result in the cache
     result = await call_llm(model_name, session, request_payload, returned_stopped_only)
-    cache[hashable_payload] = result
+
+    if result is not None:
+        cache[hashable_payload] = result
+
     return result
 
 
@@ -83,11 +87,11 @@ async def call_ollama(
     session: aiohttp.ClientSession,
     request_payload: dict,
     returned_stopped_only: bool=True
-):
+) -> Union[str, None]:
     """ Calls an ollama generate endpoint using the given request payload
     """
     try:
-        async with session.post(URL_OLLAMA_GEN, json=request_payload) as resp:
+        async with session.post(URL_OLLAMA, json=request_payload) as resp:
             response = await resp.json()
             resp.raise_for_status()
 
@@ -105,10 +109,6 @@ async def call_ollama(
         )
         return None
 
-    except KeyError as e:
-        print("KeyError", e)
-        raise e
-
     return retval
 
 
@@ -116,14 +116,14 @@ async def call_azure_openai(
     session: aiohttp.ClientSession,
     request_payload: dict,
     returned_stopped_only: bool=True
-):
+) -> Union[str, None]:
     """ Calls an Azure OpenAI generate endpoint using the given request payload
     """
     for i in range(NUM_REQUEST_RETRIES):
         try:
-            async with session.post(URL_GPT4O_MINI_COMPLETE, headers=GPT_4O_HEADERS, json=request_payload) as resp:
+            async with session.post(URL_AZURE, headers=AZURE_HEADERS, json=request_payload) as resp:
                 response = await resp.json()
-                resp.raise_for_status(session, request_payload, returned_stopped_only)
+                resp.raise_for_status()
 
             # If the model hits the output token limit, simply return None
             if returned_stopped_only and response["choices"][0]["finish_reason"] != "stop":
@@ -135,9 +135,13 @@ async def call_azure_openai(
             break
 
         except aiohttp.ClientResponseError as e:
-            # 400 is for content filter. If the request failed due to content filtering, we want to add it to the
-            #   cache because retrying the same prompt will be futile
+            # 400 is for ill-formatted request payload as well as for content filter flags
             if resp.status == 400:
+                print(
+                    "GPT ClientResponseError", e,
+                    "\nRequest:", request_payload,
+                    "\nResponse:", json.dumps(response)
+                )
                 retval = None
                 break
 
@@ -146,17 +150,14 @@ async def call_azure_openai(
             if resp.status == 429 or 500 <= resp.status < 600:
                 time.sleep(min(MAX_WAIT_TIME, np.power(2, i)))
 
-            # If the request failed due to any other reason, print the error, don't save the result to cache, and
-            #   return None. But don't raise an error (so the processing continues)
-            # If this was production code rather than an analysis of a novel technique, I would have better error
-            #   handling. Since we are iterating over the hyperparameter search space (number of questions), running
-            #   the notebook takes a long time, and I don't want a transient network error to kill the process
-            # Rerunning the notebook will retry for these errors
+            # If the request failed due to any other reason: print the request and response then raise an error
+            # If this was production code, I would have better error handling
             else:
                 print(
                     "GPT ClientResponseError", e,
                     "\nRequest:", request_payload,
                     "\nResponse:", json.dumps(response)
                 )
-                return None
+                raise e
+
     return retval
