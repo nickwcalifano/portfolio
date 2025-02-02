@@ -141,7 +141,7 @@ class LlmUtils():
             except aiohttp.ClientResponseError as e:
                 # 400 is for ill-formatted request payload as well as for content filter flags
                 if resp.status == 400:
-                    print("GPT ClientResponseError {e}\nRequest: {request_payload}\nResponse: {json.dumps(response)}")
+                    print(f"GPT ClientResponseError {e}\nRequest: {request_payload}\nResponse: {json.dumps(response)}")
                     return None
 
                 # 429 is for quote rate limit reached. If the request failed due to quota, wait then try again
@@ -152,7 +152,7 @@ class LlmUtils():
                 # If the request failed due to any other reason: print the request and response then raise an error
                 # If this was production code, I would have better error handling
                 else:
-                    print("GPT ClientResponseError {e}\nRequest: {request_payload}\nResponse: {json.dumps(response)}")
+                    print(f"GPT ClientResponseError {e}\nRequest: {request_payload}\nResponse: {json.dumps(response)}")
                     raise e
 
         raise AzureOpenAiRetriesExhaustedError("Max retries exceeded for Azure OpenAI")
