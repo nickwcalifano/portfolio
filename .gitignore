@@ -6,6 +6,19 @@
 *.xlsx
 *.csv
 *.parquet
+*.txt
+*.json
+*.jsonl
 
 # Model files
 *.h5
+*.pth
+*.safetensors
+*.pt
+*.bin
+*tfevents*
+
+# Debugging/Cached Files
+*.npy
+*.pickle
+*.pyc
