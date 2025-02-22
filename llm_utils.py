@@ -2,7 +2,7 @@
 import asyncio
 import json
 import os
-from typing import Literal, Union
+from typing import Literal, Union, get_args
 
 import aiohttp
 import numpy as np
@@ -26,7 +26,7 @@ class LlmUtils():
     @staticmethod
     def get_model_type(model_name: AllowedModelNames) -> ServerTypes:
         """Returns the server type based on the model name."""
-        return "azure_openai" if model_name in AzureOpenAIModels else "ollama"
+        return "azure_openai" if model_name in get_args(AzureOpenAIModels) else "ollama"
 
     @staticmethod
     def create_hashable_payload(model_name, request_payload):
@@ -84,6 +84,9 @@ class LlmUtils():
         returned_stopped_only: bool=True
     ) -> Union[str, None]:
         """Calls Ollama generate endpoint."""
+        if os.environ.get("OLLAMA_URL") is None:
+            raise ValueError("Missing environment variable: OLLAMA_URL")
+
         ollama_generate = os.path.join(os.environ.get("OLLAMA_URL"), "generate")
         try:
             async with session.post(ollama_generate, json=request_payload) as resp:
@@ -109,11 +112,17 @@ class LlmUtils():
         returned_stopped_only: bool=True
     ) -> Union[str, None]:
         """Calls Azure OpenAI chat completions endpoint."""
-        azure_chat_compl_url = os.environ.get("AZURE_CHAT_COMPLETION_URL"),
+        azure_chat_compl_url = os.environ.get("AZURE_CHAT_COMPLETION_URL")
+        if azure_chat_compl_url is None:
+            raise ValueError("Missing environment variable: AZURE_CHAT_COMPLETION_URL")
+
         headers = {
             "Content-Type": "application/json",
             "api-key": os.environ.get("AZURE_OPENAI_KEY"),
         }
+        if headers["api-key"] is None:
+            raise ValueError("Missing environment variable: AZURE_OPENAI_KEY")
+
         for i in range(NUM_REQUEST_RETRIES):
             try:
                 async with session.post(azure_chat_compl_url, headers=headers, json=request_payload) as resp:
