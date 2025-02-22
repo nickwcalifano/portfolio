@@ -22,3 +22,4 @@
 *.npy
 *.pickle
 *.pyc
+*copy*

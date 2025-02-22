@@ -2,7 +2,7 @@
 import asyncio
 import json
 import os
-from typing import Literal, Union
+from typing import Literal, Union, get_args
 
 import aiohttp
 import numpy as np
@@ -12,7 +12,9 @@ NUM_REQUEST_RETRIES = 10 # If we have hit our token quota, we wait some time the
 MAX_WAIT_TIME = 60 # Max time in seconds to sleep each time we wait
 
 # Type aliases
-AllowedModelNames  = Literal["deepseek-r1:14b", "llama3.2-vision", "phi4", "gpt4o-mini", "gpt4o"]
+OllamaModels = Literal["deepseek-r1:14b", "llama3.2-vision", "phi4", "nomic-embed-text"]
+AzureOpenAIModels = Literal["gpt4o-mini", "gpt4o"]
+AllowedModelNames = Union[*OllamaModels, *AzureOpenAIModels]
 ServerTypes = Literal["azure_openai", "ollama"]
 
 class AzureOpenAiRetriesExhaustedError(Exception):
@@ -21,23 +23,10 @@ class AzureOpenAiRetriesExhaustedError(Exception):
 class LlmUtils():
     """ This class has utility functions to call Ollama and Azure OpenAI endpoints """
 
-    # Configuration from environment variables (checked at startup)
-    AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY")
-    AZURE_OPENAI_URL = os.environ.get("AZURE_OPENAI_URL")
-    OLLAMA_URL = os.environ.get("OLLAMA_URL")
-
-    if not all([AZURE_OPENAI_KEY, AZURE_OPENAI_URL, OLLAMA_URL]):
-        print(AZURE_OPENAI_KEY, AZURE_OPENAI_URL, OLLAMA_URL)
-        missing_vars = [var for var, val in
-                        {"AZURE_OPENAI_KEY": AZURE_OPENAI_KEY,
-                         "AZURE_OPENAI_URL": AZURE_OPENAI_URL,
-                         "OLLAMA_URL": OLLAMA_URL}.items() if val is None]
-        raise ValueError(f"Missing environment variables: {', '.join(missing_vars)}")
-
     @staticmethod
     def get_model_type(model_name: AllowedModelNames) -> ServerTypes:
         """Returns the server type based on the model name."""
-        return "azure_openai" if "gpt" in model_name else  "ollama"
+        return "azure_openai" if model_name in get_args(AzureOpenAIModels) else "ollama"
 
     @staticmethod
     def create_hashable_payload(model_name, request_payload):
@@ -57,49 +46,50 @@ class LlmUtils():
             tuple(request_payload[item] for item in ["temperature", "top_p"])
         )
 
-    @classmethod
-    async def call_cached_llm(
-            cls,
+    @staticmethod
+    async def cached_llm_infer(
             model_name: AllowedModelNames,
             session: aiohttp.ClientSession,
             request_payload: dict,
             cache: dict,
             returned_stopped_only: bool=True
         ) -> Union[str, None]:
-        """Wrapper around call_llm. Uses cached result if available. Saves new result to cache."""
-        hashable_payload = cls.create_hashable_payload(model_name, request_payload)
+        """Wrapper around llm_complete. Uses cached result if available. Saves new result to cache."""
+        hashable_payload = LlmUtils.create_hashable_payload(model_name, request_payload)
 
         if hashable_payload in cache:
             return cache[hashable_payload]
 
-        result = await cls.call_llm(model_name, session, request_payload, returned_stopped_only)
+        result = await LlmUtils.llm_infer(model_name, session, request_payload, returned_stopped_only)
         if result is not None:
             cache[hashable_payload] = result
         return result
 
-    @classmethod
-    async def call_llm(
-            cls,
+    @staticmethod
+    async def llm_infer(
             model_name: AllowedModelNames,
             session: aiohttp.ClientSession,
             request_payload: dict,
             returned_stopped_only: bool=True
         ) -> Union[str, None]:
-        """Calls the given model's generate endpoint."""
-        model_type = cls.get_model_type(model_name)
-        handler = cls.call_ollama if model_type == "ollama" else cls.call_azure_openai
+        """Calls the given model's generate or chat completion endpoint."""
+        model_type = LlmUtils.get_model_type(model_name)
+        handler = LlmUtils.ollama_generate if model_type == "ollama" else LlmUtils.azure_openai_chat_completion
         return await handler(session, request_payload, returned_stopped_only)
 
-    @classmethod
-    async def call_ollama(
-        cls,
+    @staticmethod
+    async def ollama_generate(
         session: aiohttp.ClientSession,
         request_payload: dict,
         returned_stopped_only: bool=True
     ) -> Union[str, None]:
-        """Calls an Ollama generate endpoint."""
+        """Calls Ollama generate endpoint."""
+        if os.environ.get("OLLAMA_URL") is None:
+            raise ValueError("Missing environment variable: OLLAMA_URL")
+
+        ollama_generate = os.path.join(os.environ.get("OLLAMA_URL"), "generate")
         try:
-            async with session.post(cls.OLLAMA_URL, json=request_payload) as resp:
+            async with session.post(ollama_generate, json=request_payload) as resp:
                 response = await resp.json()
                 resp.raise_for_status()
 
@@ -115,21 +105,27 @@ class LlmUtils():
             print(f"Ollama Error: {e}\nRequest: {request_payload}")
             return None
 
-    @classmethod
-    async def call_azure_openai(
-        cls,
+    @staticmethod
+    async def azure_openai_chat_completion(
         session: aiohttp.ClientSession,
         request_payload: dict,
         returned_stopped_only: bool=True
     ) -> Union[str, None]:
-        """Calls an Azure OpenAI generate endpoint."""
+        """Calls Azure OpenAI chat completions endpoint."""
+        azure_chat_compl_url = os.environ.get("AZURE_CHAT_COMPLETION_URL")
+        if azure_chat_compl_url is None:
+            raise ValueError("Missing environment variable: AZURE_CHAT_COMPLETION_URL")
+
         headers = {
             "Content-Type": "application/json",
-            "api-key": cls.AZURE_OPENAI_KEY,
+            "api-key": os.environ.get("AZURE_OPENAI_KEY"),
         }
+        if headers["api-key"] is None:
+            raise ValueError("Missing environment variable: AZURE_OPENAI_KEY")
+
         for i in range(NUM_REQUEST_RETRIES):
             try:
-                async with session.post(cls.AZURE_OPENAI_URL, headers=headers, json=request_payload) as resp:
+                async with session.post(azure_chat_compl_url, headers=headers, json=request_payload) as resp:
                     response = await resp.json()
                     resp.raise_for_status()
 
