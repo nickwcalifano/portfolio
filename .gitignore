@@ -23,3 +23,6 @@
 *.pickle
 *.pyc
 *copy*
+
+# Allow requirements files
+!requirements*.txt
