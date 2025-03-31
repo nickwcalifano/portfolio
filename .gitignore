@@ -23,3 +23,6 @@
 *.pkl
 *.pyc
 *copy*
+
+# Allow requirements files
+!requirements*.txt
