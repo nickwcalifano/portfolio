@@ -20,7 +20,7 @@
 
 # Debugging/Cached Files
 *.npy
-*.pickle
+*.pkl
 *.pyc
 *copy*
 
